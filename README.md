@@ -11,45 +11,34 @@ This repository contains the code for a Kubernetes operator that manages Vertica
 Install the `CustomResourceDefinition` with a YAML manifest:
 
 ```
-$ kubectl apply -f https://github.com/vertica/vertica-kubernetes/releases/download/v1.0.0/verticadbs.vertica.com-crd.yaml
+kubectl apply -f https://github.com/vertica/vertica-kubernetes/releases/download/v1.0.0/verticadbs.vertica.com-crd.yaml
 ```
 
 Both the webhook and operator Helm chart install the CRD if it is not currently installed.
+
+# Installing cert-manager
+
+The operator includes a webhook for an admission controller.  An [admission controller](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/) is a REST endpoint that you set up within Kubernetes that verifies proposed changes to the custom resource are allowed.  Kubernetes requires that all webhooks accept TLS certificates, so a certificate must be set up prior to installing the operator. Vertica recommends [cert-manager](https://cert-manager.io/docs/) to manage certificates for your Kubernetes resources. Install the cert-manager with `kubectl apply`.
+
+```
+kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.3.1/cert-manager.yaml
+```
+
+It can take a few minutes for cert-manager install to complete. For steps on how to verify that the install is complete, see the [cert-manager documentation](https://cert-manager.io/docs/installation/verify/).
 
 # Installing the Operator
 
 Install the operator with a Helm chart to manage a Vertica database. Run the following commands to download and install the chart:
 
 ```
-$ helm repo add vertica-charts https://vertica.github.io/charts
-$ helm repo update
-$ helm install vdb-op vertica-charts/verticadb-operator
+helm repo add vertica-charts https://vertica.github.io/charts
+helm repo update
+helm install vdb-op vertica-charts/verticadb-operator
 ```
 
 You can install only one instance of the chart in a namespace. The operator monitors CRs that were defined in its namespace only.
 
-
-# Installing the Webhook
-
-A separate install is required to install a webhook for an admission controller. An [admission controller](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/) is a REST endpoint that you set up within Kubernetes that verifies proposed changes to the custom resource are allowed. Running with the admission controller is optional, but it is highly encouraged to prevent simple errors from being made when modifying the custom resource.
-
-Because Kubernetes requires that the webhook accept TLS certificates, a certificate must be set up prior to installing the webhook. Vertica recommends [cert-manager](https://cert-manager.io/docs/) to manage certificates for your Kubernetes resources. Install the cert-manager with `kubectl apply`.
-
-```
-$ kubectl apply -f https://github.com/jetstack/cert-manager/releases/download/v1.3.1/cert-manager.yaml
-```
-
-It can take a few minutes for cert-manager install to complete. For steps on how to verify that the install is complete, see the [cert-manager documentation](https://cert-manager.io/docs/installation/verify/).
-
-After cert-manager completes, install the webhook:
-
-```
-$ helm repo add vertica-charts https://vertica.github.io/charts
-$ helm repo update
-$ helm install -n vertica --create-namespace vdb-webhook vertica-charts/verticadb-webhook
-```
-
-The webhook is cluster-scoped. It is installed into only one namespace (vertica) and is used by operators installed in any namespaces.
+This install includes a webhook for admission control.
 
 # Deploying Vertica
 
@@ -89,7 +78,7 @@ By default, we use the [Community Edition (CE)](https://www.vertica.com/download
 To use your own license, add it to a secret in the same namespace as the operator. The following command copies the license into a secret named `license`:
 
 ```
-$ kubectl create secret generic license --from-file=license.key=/path/to/license.key
+kubectl create secret generic license --from-file=license.key=/path/to/license.key
 ```
 
 Next, specify the name of the secret in the CR by populating the `licenseSecret` field:
@@ -113,7 +102,7 @@ spec:
 The license is installed automatically if it is set when the CR was initially created. If it is added at a later time, then you must install the license manually with admintools.  When a license secret is specified, the contents of the secret are mounted as files in `/home/dbadmin/licensing/mnt`. For example, the secret created in the previous commands has the following directory in each pod created by the CR:
 
 ```
-$ [dbadmin@demo-sc1-0 ~]$ ls /home/dbadmin/licensing/mnt
+[dbadmin@demo-sc1-0 ~]$ ls /home/dbadmin/licensing/mnt
 license.key
 ```
 
@@ -337,6 +326,7 @@ The following table describes each configurable parameter in the VerticaDB CRD a
 | subclusters[i].size | The number of pods in the subcluster. This determines the number of Vertica nodes in the subcluster. Changing this number either deletes or schedules new pods. <br><br>The minimum size of any subcluster is 1. If `kSafety` is 1, the actual minimum may be higher, as you need at least 3 nodes from primary subclusters to satisfy k-safety.<br><br>**NOTE**: You must have a valid license to pick a value that causes the size of all subclusters combined to be bigger than 3. The default license that comes in the Vertica container is for the Cmmunity Edition (CE), which only allows up to 3 nodes. The license can be set with the `licenseSecret` parameter.| 3 |
 | subclusters[i].tolerations | Any [tolerations and taints](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/) used to influence where a pod is scheduled. |  |
 | superuserPasswordSecret | The Secret that contains the database superuser password. The secret must be in the same namespace as the CR. If this is not set, then we assume no such password is set for the database.  If this is set, it is up the user to create this secret before deployment. The secret must have a key named `password`.<br><br> The following command creates the password: <br> ```kubectl create secret generic su-passwd --from-literal=password=sup3rs3cr3t```<br><br> The corresponding change in the CR is:<br> <pre>db:<br>  superuserSecretPassword: su-passwd<br> </pre>|  |
+| volumes | Custom volumes that are added to sidecars.  Each sidecar must include the volume in the volumeMounts for it to appear in the container.  It accepts any valid volume type.  A unique name must be given for each volume and it cannot conflict with any of the internally generated volumes. | |
 
 # Additional Details
 
