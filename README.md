@@ -2,8 +2,8 @@ This repository contains the code for a Kubernetes operator that manages Vertica
 
 # Prerequisites
 
-- Kubernetes (version 1.19.3+)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) (version 1.19.3+).  
+- Kubernetes (version 1.21.1+)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) (version 1.21.1+).  
 - [helm](https://helm.sh/docs/intro/install/) (version 3.5.0+)
 
 # Installing the CRD
@@ -38,7 +38,7 @@ helm install vdb-op vertica-charts/verticadb-operator
 
 You can install only one instance of the chart in a namespace. The operator monitors CRs that were defined in its namespace only.
 
-This install includes a webhook for admission control.
+This install includes a webhook for admission control.  The feature gate NamespaceDefaultLabelName is required for the webhook to work. It is enabled by default on Kubernetes 1.21.0. This feature will add a label 'kubernetes.io/metadata.name=nsName' to each namespace, which is needed in order to use the namespaceSelector in the webhook config.
 
 # Deploying Vertica
 
