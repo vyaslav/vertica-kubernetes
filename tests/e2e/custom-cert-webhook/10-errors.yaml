@@ -10,9 +10,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-apiVersion: v2
-name: verticadb-webhook
-description: An admission controller webhook for validating VerticaDB CRs
-type: application
-# Versions follow Semantic Versioning (https://semver.org/)
-version: 1.0.0
+
+# List of objects that should not be created since we used a custom cert when
+# we deployed the operator.
+
+apiVersion: v1
+kind: Secret
+metadata:
+    name: webhook-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+    name: verticadb-operator-serving-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+    name: verticadb-operator-selfsigned-issuer

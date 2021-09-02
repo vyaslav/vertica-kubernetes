@@ -20,7 +20,6 @@ Developing with this repo requires a working Kubernetes cluster. Additionally, t
 
 - **docker-vertica/**: has the necessary files to build a Vertica server container. The build process requires that you provide a Vertica version 10.1.1 or higher RPM package. The RPM is not included in this repo.
 - **docker-operator/**: has the necessary files to build the container that holds the operator
-- **docker-webhook/**: has the necessary files to build the container that holds the webhook
 - **docker-vlogger/**: has the necessary files to build the container that runs the vlogger sidecar. This sidecar will tail the vertica.log to stdout. This is used only for development purposes to aid in testing out the sidecar property in the custom resource (CR).
 - **scripts/**: contains scripts for the repository. Some scripts run Makefile targes, while others, such as *upgrade-vertica.sh*, automate manual tasks.
 - **api/**: defines the spec of the custom resource definition (CRD)
@@ -89,8 +88,7 @@ $ cp /dir/vertica-x86_64.RHEL6.latest.rpm docker-vertica/packages/
 
 We currently use the following containers:
 - **docker-vertica/Dockerfile**: The long-running container that runs the vertica daemon.
-- **docker-operator/Dockerfile**: The container that runs the operator.
-- **docker-webhook/Dockerfile**: The container that runs the webhook.
+- **docker-operator/Dockerfile**: The container that runs the operator and webhook
 - **docker-vlogger/Dockerfile**: The container that runs the vertica logger. It will tail the output of vertica.log to stdout. This is used for testing purposes. Some e2e tests use this as a sidecar to the Vertica server container.
 
 To run Vertica in Kubernetes, we need to package Vertica inside a container. This container is later referenced in the YAML file when we install the Helm chart.
@@ -99,7 +97,6 @@ By default, we create containers that are stored in the local docker daemon. The
 
 - **OPERATOR_IMG**: Operator image name.
 - **VERTICA_IMG**: Vertica image name.
-- **WEBHOOK_IMG**: Webhook image name.
 - **VLOGGER_IMG**: Vertica logger sidecar image name.
 
 If necessary, these variables can include the url of the registry. For example, `export OPERATOR_IMG=myrepo:5000/verticadb-operator:latest`.
@@ -176,12 +173,14 @@ This method runs the operator synchronously in your shell. It is the fastest way
 Enter the following command:
 
 ```
-$ make install run
+$ make install run ENABLE_WEBHOOKS=false
 ```
 
 Press **Ctrl+C** to stop the operator.
 
 **NOTE:** When you run the operator locally, you can run only ad-hoc tests, not integration and e2e tests
+
+This disables the webhook from runing too, as running the webhook requires TLS certs to be available.
 
 ### Option 2: Kubernetes Deployment
 
@@ -204,10 +203,10 @@ $ make undeploy
 
 This is the most convenient way to run the operator. Before you create a release with the Helm chart, you must generate the manifests that Helm uses to install the operator.
 
-1. Run the `helm-create-resources` make target to generate the manifests:
+1. Run the `create-helm-charts` make target to generate the helm charts:
 
    ```
-   $ make helm-create-resources
+   $ make create-helm-charts
    ```
 
 2. Install the verticadb-operator in a specific namespace with the `helm install` command:
@@ -233,11 +232,11 @@ Ensure that your Kubernetes cluster has a default storageClass. Most of the e2e 
 
 1. Push the operator and webhook with the following command:
    ```
-   $ make docker-build-operator docker-build-webhook docker-push-operator docker-push-webhook
+   $ make docker-build-operator docker-push-operator
    ```
 2. Verify that your operator Dockerfile is up-to-date before starting the tests.
    ```
-   $ make helm-create-resources
+   $ make create-helm-charts
    ```
 3. Start the test with the following make target:
    ```
