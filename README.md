@@ -235,41 +235,45 @@ However, Vertica does not support a cluster running mixed releases. The document
 2.	Update the RPM at each host.
 3.	Start the cluster.
 
-Vertica on Kubernetes uses the workflow described in the preceding steps. Because the operator's main purpose is to ensure that Vertica is always running, there is a special `autoRestartVertica` parameter in the CR that forces the operator to skip its monitoring of the Vertica process. This allows cluster-wide operations like stopping the cluster without operator interference.
+Vertica on Kubernetes uses the workflow described in the preceding steps. This is triggered whenever the `.spec.image` changes in the CR.  When the operator detects this, it will enter the upgrade mode, logging events of its progress for monitoring purposes.
 
-The following steps are included automated in the `scripts/upgrade-vertica.sh` script. To manually upgrade Vertica:
+A status condition (UpgradeInProgress) is provided so that you can programatically detect when the upgrade has finished.  
 
-1. Set `autoRestartVertica` to false in the CRD. This tells the operator to avoid checking if the Vertica process is running:
-   ```
-   $ kubectl patch verticadb vert-cluster --type=merge --patch '{"spec": {"autoRestartVertica": false}}'
-   ```
-2. Wait for the operator to acknowledge this state change:
-   ```
-   $ kubectl wait --for=condition=AutoRestartVertica=False vdb/vert-cluster –-timeout=180s
-   ```
+Here is an example to illustrate how to do an upgrade.
 
-3. To prevent mixed Vertica versions, stop the entire cluster:
-   ```
-   $ kubectl exec vert-cluster-sc1-0 -- admintools -t stop_db -F -d vertdb
-   ```
-4. Update the container tag in the CR:
+1. Update the `.spec.image` in the CR.  This can be driven by a helm upgrade if you have the CR in a chart, or a simple patch of the CR.  
    ```
    $ kubectl patch verticadb vert-cluster --type=merge --patch '{"spec": {"image": "vertica/vertica-k8s:11.1.1-0"}}'
    ```
-5. Delete the pods so that they can pickup the new image. The simplest way to delete the pods is to delete the StatefulSets so the operator regenerates them:
+   
+2. Wait for the operator to acknowledge this change and enter the upgrade mode.
    ```
-   $ kubectl delete statefulset -l app.kubernetes.io/instance=vert-cluster -–cascade=forground
+   $ kubectl wait --for=condition=UpgradeInProgress=True vdb/vert-cluster –-timeout=180s
    ```
-6. Enable `autoRestartVertica` to give control back to the operator to restart the Vertica process:
-   ```
-   $ kubectl patch verticadb vert-cluster --type=merge --patch '{"spec": {"autoRestartVertica": true}}'
-   ```
-7. Wait for the operator to bring everything back up:
-   ```
-   $ kubectl wait --for=condition=Ready=True pod -l app.kubernetes.io/instance=vert-cluster –-timeout=600s
-   ```
+   
+3.  Wait for the operator to leave the upgrade mode. 
+    ```
+    $ kubectl wait --for=condition=UpgradeInProgress=False vdb/vert-cluster –-timeout=800s
+    ```
+   
+You can monitor what part of the upgrade the operator is in by looking at the events it generates.
 
-To minimize the number of errors, we validate that the image can only change when `autoRestartVertica` is false.
+```
+$ kubectl describe vdb vert-cluster
+ 
+...<snip>...
+Events:
+  Type    Reason                   Age    From                Message
+  ----    ------                   ----   ----                -------
+  Normal  UpgradeStart             5m10s  verticadb-operator  Vertica server upgrade has been initiated to 'vertica-k8s:11.0.1-0'
+  Normal  ClusterShutdownStarted   5m12s  verticadb-operator  Calling 'admintools -t stop_db'
+  Normal  ClusterShutdownSucceeded 4m08s  verticadb-operator  Successfully called 'admintools -t stop_db' and it took 56.22132s
+  Normal  ClusterRestartStarted    4m25s  verticadb-operator  Calling 'admintools -t start_db' to restart the cluster
+  Normal  ClusterRestartSucceeded  25s    verticadb-operator  Successfully called 'admintools -t start_db' and it took 240s
+  Normal  UpgradeSucceeded         5s     verticadb-operator  Vertica server upgraded has completed successfully.
+```
+
+Vertica recommends that [upgrade paths](https://www.vertica.com/docs/11.0.x/HTML/Content/Authoring/InstallationGuide/Upgrade/UpgradePaths.htm?zoom_highlight=upgrade%20path) be incremental – meaning you upgrade to each intermediate major and minor release.  The operator assumes the images chosen are following this path and doesn't try to validate it.
 
 # Persistence
 
@@ -295,14 +299,14 @@ The following table describes each configurable parameter in the VerticaDB CRD a
 | Parameter Name | Description | Default Value |
 |-------------|-------------|---------------|
 | annotations | Custom annotations added to all of the objects that the operator creates. | 
-| autoRestartVertica | State to indicate whether the operator will restart vertica if the process is not running.  Under normal circumstances this is set to true.  The purpose of this is to allow maintenance window, such as an upgrade, without the operator interfering. | true
+| autoRestartVertica | State to indicate whether the operator will restart vertica if the process is not running.  Under normal circumstances this is set to true.  The purpose of this is to allow maintenance window, such as a manual upgrade, without the operator interfering. | true
 | communal.credentialSecret | The name of a secret that contains the credentials to connect to the communal S3 endpoint. The secret must have the following keys set: <br>- *accesskey*: The access key to use for any S3 request.<br>- *secretkey*: The secret that goes along with the access key.<br><br>For example, you can create your secret with the following command:<br><pre>kubectl create secret generic s3-creds <br>--from-literal=accesskey=accesskey --from-literal=secretkey=secretkey</pre><br>Then you set the the secret name in the CR.<br><pre>communal:<br>  credentialSecret: s3-creds<br></pre> |  |
 | communal.endpoint | The URL to the s3 endpoint. The endpoint must begin with either `http://` or `https://`.. This field is required and cannot change after creation. |  |
 | communal.includeUIDInPath | When set to true, the operator includes the VerticaDB's UID in the path. This option exists if you reuse the communal path in the same endpoint as it forces each database path to be unique. | false |
 | communal.path | The path to the communal storage. This must be a s3 bucket. You specify this using the s3:// bucket notation. For example: `s3://bucket-name/key-name`. You must create this bucket before creating the VerticaDB. This field is required and cannot change after creation.  If `initPolicy` is *Create*, then this path must be empty.  If the `initPolicy` is *Revive*, then this path must be non-empty. |  |
 | dbName | The name to use for the database.  When `initPolicy` is `Revive`, this must match the name of the database that used when it was originally created. | vertdb
 | ignoreClusterLease | Ignore the cluster lease when doing a revive or start_db. Use this with caution, as ignoring the cluster lease when another system is using the same communal storage will cause corruption. | false
-| image | The name of the container that runs the server.  If hosting the containers in a private container repository, this name must include the path to that repository.  Vertica doesn't allow communications between nodes running different versions, so this is allowed to change only if `autoRestartVertica` is disabled.| vertica/vertica-k8s:11.0.0-0-minimal |
+| image | The name of the container that runs the server.  If hosting the containers in a private container repository, this name must include the path to that repository.  Whenever this changes, the operator treats this as an upgrade and will stop the entire cluster and restart it with the new image. | vertica/vertica-k8s:11.0.0-0-minimal |
 | imagePullPolicy | Determines how often Kubernetes pulls the specified image. For details, see [Updating Images](https://kubernetes.io/docs/concepts/containers/images/#updating-images) in the Kubernetes documentation. | If the image tag ends with `latest`, we use `Always`.  Otherwise we use `IfNotPresent`.
 | imagePullSecrets | A list of secrets consisting of credentials for authentication to a private container repository. For details, see [Specifying imagePullSecrets](https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod) in the Kubernetes documentation. |  |
 | initPolicy | Specifies how to initialize the database in Kubernetes. Available options are: *Create* or *Revive*.  *Create* forces the creation of a new database. *Revive* initializes the database with the use of the revive command. | Create |
